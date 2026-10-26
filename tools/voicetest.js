@@ -1,0 +1,3 @@
+const {chromium}=require('playwright-core');(async()=>{const b=await chromium.launch({executablePath:'/usr/bin/google-chrome',args:['--autoplay-policy=no-user-gesture-required']});const p=await b.newPage();const errs=[],got=[];
+p.on('pageerror',e=>errs.push(e.message));p.on('console',m=>{if(m.type()==='error')errs.push(m.text())});p.on('requestfinished',r=>{if(r.url().includes('voice'))got.push(r.url().split('/').pop())});
+await p.goto('file:///workspace/bubble-vs/index.html?mode=aivai');await p.waitForTimeout(6000);console.log('state',await p.evaluate(()=>window.__game.state));console.log('voice files',got.sort().join(','));console.log('errors',errs);await b.close();})();
