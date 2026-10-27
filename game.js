@@ -5,14 +5,17 @@ const cv=document.getElementById('c'),ctx=cv.getContext('2d');
 const LW=960,LH=640,RES_OPTS=['auto','720','1080','1440'],RES_LABEL={auto:'自動',720:'720p',1080:'1080p',1440:'1440p'};
 let resMode=(()=>{try{const q=new URLSearchParams(location.search).get('res');if(RES_OPTS.includes(q))return q;const v=localStorage.getItem('bvs_res');return RES_OPTS.includes(v)?v:'auto';}catch(e){return'auto';}})();
 let RS=1; // backing pixels per logical pixel
-function fitCanvas(){const vw=innerWidth,vh=innerHeight,fit=Math.max(0.1,Math.min(vw/LW,vh/LH));const cw=Math.floor(LW*fit),ch=Math.floor(LH*fit);
+const stageEl=document.getElementById('stage');
+function fitCanvas(){const vw=stageEl?stageEl.clientWidth:innerWidth,vh=stageEl?stageEl.clientHeight:innerHeight,fit=Math.max(0.1,Math.min(vw/LW,vh/LH));const cw=Math.floor(LW*fit),ch=Math.floor(LH*fit);
  cv.style.width=cw+'px';cv.style.height=ch+'px';
  let bh=resMode==='auto'?Math.round(ch*(window.devicePixelRatio||1)):+resMode;bh=Math.max(320,Math.min(2160,bh));const bw=Math.round(bh*LW/LH);
  if(cv.width!==bw||cv.height!==bh){cv.width=bw;cv.height=bh;}RS=bh/LH;}
 function setRes(m){resMode=m;try{localStorage.setItem('bvs_res',m);}catch(e){}fitCanvas();}
-function isFull(){return!!document.fullscreenElement;}
-function toggleFull(){try{if(isFull())document.exitFullscreen();else{const pr=document.documentElement.requestFullscreen();if(pr&&pr.catch)pr.catch(()=>{});}}catch(e){}}
-addEventListener('resize',fitCanvas);document.addEventListener('fullscreenchange',fitCanvas);
+function isFull(){return!!(document.fullscreenElement||document.webkitFullscreenElement);}
+function toggleFull(){try{const d=document,el=d.documentElement;if(isFull()){(d.exitFullscreen||d.webkitExitFullscreen).call(d);}else{const rq=el.requestFullscreen||el.webkitRequestFullscreen;if(!rq)return;const pr=rq.call(el,{navigationUI:'hide'});const lock=()=>{try{const o=screen.orientation;if(o&&o.lock&&IS_TOUCH){const q=o.lock('landscape');if(q&&q.catch)q.catch(()=>{});}}catch(e){}};if(pr&&pr.then)pr.then(lock,()=>{});else lock();}}catch(e){}}
+const IS_TOUCH=/[?&]touch=1/.test(location.search)||(window.matchMedia&&matchMedia('(pointer: coarse)').matches)||('ontouchstart' in window&&navigator.maxTouchPoints>0);
+if(IS_TOUCH)document.documentElement.classList.add('touch');
+addEventListener('resize',fitCanvas);addEventListener('orientationchange',()=>setTimeout(fitCanvas,250));if(window.visualViewport)visualViewport.addEventListener('resize',fitCanvas);document.addEventListener('fullscreenchange',fitCanvas);document.addEventListener('webkitfullscreenchange',fitCanvas);
 if(window.matchMedia){try{matchMedia('(resolution: '+(window.devicePixelRatio||1)+'dppx)').addEventListener('change',fitCanvas);}catch(e){}}
 fitCanvas();
 let overlay=null,ovSel=0; // null | 'pause' | 'settings'
@@ -32,7 +35,14 @@ function voice(n){if(muted)return;const r=VOICE[n];if(!r||!r.ok)return;try{r.a.v
 const SFX_VOL={shoot:.5,bounce:.45,stick:.5,pop:.7,combo:.7,drop:.6,skill:.85,garbage:.7,danger:.6,ceiling:.7,win:.8,lose:.8,select:.5,confirm:.6};
 function sfx(n,fb){if(muted)return;const S=SFX[n];if(S&&S.ok){try{if(S.pool.length<4)S.pool.push(S.a.cloneNode());const a=S.pool[S.i++%S.pool.length];a.volume=SFX_VOL[n]||.6;a.currentTime=0;const pr=a.play();if(pr&&pr.catch)pr.catch(()=>{});return;}catch(e){}}if(fb)fb();}
 let bgmEl=null;function bgmSync(){try{if(!bgmEl){bgmEl=new Audio('audio/bgm.ogg');bgmEl.loop=true;bgmEl.volume=.28;bgmEl.addEventListener('error',()=>{bgmEl.dead=true});}if(bgmEl.dead)return;const want=!muted&&(state==='play'||state==='roundover'||state==='skill');if(want&&bgmEl.paused){const pr=bgmEl.play();if(pr&&pr.catch)pr.catch(()=>{});}else if(!want&&!bgmEl.paused)bgmEl.pause();}catch(e){}}
-let ac=null;function beep(f,d=0.08,t='square',v=0.05){if(muted)return;try{ac=ac||new AudioContext();const o=ac.createOscillator(),g=ac.createGain();o.type=t;o.frequency.value=f;g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+d);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d);}catch(e){}}
+let ac=null;function beep(f,d=0.08,t='square',v=0.05){if(muted)return;try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.type=t;o.frequency.value=f;g.gain.value=v;g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+d);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d);}catch(e){}}
+// iOS/Android: media elements and WebAudio may only start inside a user gesture -> unlock everything on first touch/click/key
+let audioUnlocked=false;function unlockAudio(){if(audioUnlocked)return;audioUnlocked=true;
+ const els=[];for(const n of SFX_NAMES){const S=SFX[n];while(S.pool.length<4)S.pool.push(S.a.cloneNode());els.push(S.a,...S.pool);}for(const k in VOICE)els.push(VOICE[k].a);
+ try{if(!bgmEl){bgmEl=new Audio('audio/bgm.ogg');bgmEl.loop=true;bgmEl.volume=.28;bgmEl.addEventListener('error',()=>{bgmEl.dead=true});}els.push(bgmEl);}catch(e){}
+ for(const a of els){try{a.muted=true;const pr=a.play();const done=()=>{try{if(a!==bgmEl||!(state==='play'||state==='roundover'||state==='skill')){a.pause();a.currentTime=0;}}catch(e){}a.muted=false;};if(pr&&pr.then)pr.then(done,()=>{a.muted=false;});else done();}catch(e){}}
+ try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();if(ac.resume)ac.resume();const b=ac.createBuffer(1,1,22050),src=ac.createBufferSource();src.buffer=b;src.connect(ac.destination);src.start(0);}catch(e){}}
+['pointerdown','touchend','keydown','click'].forEach(ev=>addEventListener(ev,unlockAudio,{capture:true,passive:true}));
 const rnd=n=>Math.floor(Math.random()*n);
 
 // ---- optional art: drop PNGs into art/gpt/ (see art/README.md). Everything here has a
@@ -255,7 +265,11 @@ addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDow
   else{const human=players[humanSide],ai=players[1-humanSide];if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')human.fire();if(e.code.startsWith('Shift')||e.code==='KeyE')human.useSkill(ai);}}});
 addEventListener('keyup',e=>keys[e.code]=false);
 function mpos(e){const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*LW/r.width,(e.clientY-r.top)*LH/r.height]}
-cv.addEventListener('mousemove',e=>{const[x,y]=mpos(e);
+const touchAim={}; // pointerId -> player index, for drag-to-aim / release-to-fire
+function aimAt(b,x,y){const[lx,ly]=b.launcher();if(y<ly-5)b.angle=Math.max(-1.4,Math.min(1.4,Math.atan2(x-lx,ly-y)));else b.angle=Math.max(-1.4,Math.min(1.4,(x-lx)/120));}
+function touchPlayer(x){if(state!=='play'||skillAnim||overlay)return -1;if(mode==='ai')return humanSide;if(mode==='2p')return x<480?0:1;return -1;}
+cv.addEventListener('pointermove',e=>{const[x,y]=mpos(e);
+ if(e.pointerType!=='mouse'){const pi=touchAim[e.pointerId];if(pi!=null&&state==='play'&&!skillAnim)aimAt(players[pi],x,y);if(pi!=null||!e.buttons)return;}
  if(overlay){const M=overlay==='pause'?PAUSE_MENU:SET_MENU;for(let i=0;i<M.length;i++)if(Math.abs(y-ovY(i,M.length))<22&&Math.abs(x-480)<190)ovSel=i;return;}
  if(state==='title'){for(let i=0;i<MENU.length;i++)if(Math.abs(y-(330+i*52))<22&&Math.abs(x-480)<190)menuSel=i;return;}
  if(state==='oppselect'){for(let i=0;i<OPP_MENU.length;i++)if(Math.abs(y-(300+i*52))<22&&Math.abs(x-480)<190)menuSel=i;return;}
@@ -265,7 +279,7 @@ cv.addEventListener('mousemove',e=>{const[x,y]=mpos(e);
 const MUTE_XY=[944,620];
 function ovY(i,n){return 320-(n-1)*26+i*52;}
 const FS_XY=[944,582],GEAR_XY=[944,544];
-cv.addEventListener('mousedown',e=>{const[x,y]=mpos(e);
+cv.addEventListener('pointerdown',e=>{const[x,y]=mpos(e);if(e.pointerType==='mouse'&&e.button!==0)return;
  if((x-MUTE_XY[0])**2+(y-MUTE_XY[1])**2<18*18){muted=!muted;return;}
  if((x-FS_XY[0])**2+(y-FS_XY[1])**2<16*16){toggleFull();return;}
  if((x-GEAR_XY[0])**2+(y-GEAR_XY[1])**2<16*16){if(!overlay){if(state==='play'||state==='skill'){overlay='pause';ovSel=0;}else openSettings(null);}return;}
@@ -276,7 +290,23 @@ cv.addEventListener('mousedown',e=>{const[x,y]=mpos(e);
  if(state==='help'){setState('title');return;}
  if(state==='roundover'){nextRound();return;}
  if(state==='over'){if(Math.abs(y-340)<16){if(x<340)start(mode);else if(x<620)toCharSelect();else setState('title');}return;}
+ if(e.pointerType!=='mouse'){const pi=touchPlayer(x);if(pi>=0){touchAim[e.pointerId]=pi;try{cv.setPointerCapture(e.pointerId);}catch(_){}aimAt(players[pi],x,y);}return;}
  if(state==='play'&&mode==='ai')players[humanSide].fire();});
+function touchEnd(e,fire){const pi=touchAim[e.pointerId];if(pi==null)return;delete touchAim[e.pointerId];if(fire&&state==='play'&&!skillAnim&&!overlay&&players[pi])players[pi].fire();}
+cv.addEventListener('pointerup',e=>touchEnd(e,true));cv.addEventListener('pointercancel',e=>touchEnd(e,false));
+// ---- on-screen touch pad (HTML, outside/around the canvas): hold arrows to aim, tap fire / skill ----
+const tcEl=document.getElementById('tc');
+function tcPress(act,down){const[L,Rb]=players;if(!L)return;
+ if(act.startsWith('k:')){keys[act.slice(2)]=down;return;}if(!down||state!=='play'||overlay)return;
+ const me=mode==='2p'?(act.endsWith('L')?L:Rb):players[humanSide],op=me===L?Rb:L;
+ if(act.startsWith('fire'))me.fire();else if(act.startsWith('skill'))me.useSkill(op);}
+if(tcEl){tcEl.querySelectorAll('button').forEach(bt=>{const a=()=>bt.dataset[mode==='2p'?'p2':'p1'];
+  bt.addEventListener('pointerdown',e=>{e.preventDefault();bt.classList.add('on');try{bt.setPointerCapture(e.pointerId);}catch(_){}tcPress(a(),true);});
+  const up=e=>{bt.classList.remove('on');const v=a();if(v&&v.startsWith('k:'))tcPress(v,false);};bt.addEventListener('pointerup',up);bt.addEventListener('pointercancel',up);bt.addEventListener('contextmenu',e=>e.preventDefault());});
+ setInterval(()=>{const show=IS_TOUCH&&(state==='play'||state==='skill'||state==='intro')&&!overlay&&(mode==='ai'||mode==='2p');tcEl.classList.toggle('show',show);tcEl.classList.toggle('two',mode==='2p');
+  const h=players[mode==='2p'?0:humanSide];const sk=tcEl.querySelectorAll('.sk');sk.forEach((b,i)=>{const p=mode==='2p'?players[i]:h;b.classList.toggle('ready',!!(p&&p.meter>=100));});},120);}
+['gesturestart','gesturechange','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+document.addEventListener('touchmove',e=>{if(e.touches.length>1||e.target===cv||(tcEl&&tcEl.contains(e.target)))e.preventDefault();},{passive:false});
 
 function endRound(w){winner=w;{const youWin=w>=0&&(mode!=='ai'||w===humanSide);setTimeout(()=>{if(state==='roundover'||state==='over')voice(youWin?'win':'lose');},700);}if(w>=0){matchScore[w]++;sfx((w===0||mode!=='ai')?'win':'lose',()=>beep(w===0?880:200,0.5,'triangle'));}else sfx('lose',()=>beep(300,0.4,'triangle'));
  if(w>=0&&matchScore[w]>=BO){state='over';overT=0;}else{state='roundover';roundT=1.8;}}
